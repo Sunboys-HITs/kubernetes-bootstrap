@@ -23,6 +23,11 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
         run: |
+          if [ -z "${DOCS_DISPATCH_TOKEN}" ]; then
+            echo "DOCS_DISPATCH_TOKEN secret is not configured in this repository."
+            exit 1
+          fi
+
           curl --fail-with-body \
             -X POST \
             -H "Accept: application/vnd.github+json" \

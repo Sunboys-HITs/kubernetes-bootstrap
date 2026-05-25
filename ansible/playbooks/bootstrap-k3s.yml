@@ -110,6 +110,9 @@
         mode: "0700"
       delegate_to: localhost
       become: false
+      vars:
+        ansible_become: false
+        ansible_connection: local
 
     - name: Write local kubeconfig
       ansible.builtin.copy:
@@ -118,3 +121,6 @@
         mode: "0600"
       delegate_to: localhost
       become: false
+      vars:
+        ansible_become: false
+        ansible_connection: local
