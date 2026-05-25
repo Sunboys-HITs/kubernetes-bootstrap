@@ -1,65 +1,89 @@
-# K3s Bootstrap
+﻿# K3s Bootstrap
 
-Этот runbook описывает развертывание базового Kubernetes-кластера k3s для системы автотестирования SUNBOYS на готовых Linux VM.
+Runbook описывает базовое развертывание Kubernetes-кластера k3s для SUNBOYS на готовых Linux VM через Ansible.
 
-## Что разворачивается
+## Назначение
 
-- Один control-plane узел k3s.
-- Один или несколько worker-узлов k3s.
-- Локальный kubeconfig для доступа к кластеру.
-- Базовые namespace:
-  - `app`
-  - `infra`
-  - `monitoring`
+Репозиторий закрывает начальный bootstrap кластера:
 
-На этом этапе не устанавливаются приложения, ingress controller, мониторинг, PostgreSQL, RabbitMQ или Helm charts.
+- установка k3s control-plane;
+- подключение worker-нод;
+- сохранение kubeconfig на управляющую машину;
+- создание namespace `app`, `infra`, `monitoring`;
+- проверка состояния кластера.
+
+На этом этапе не устанавливаются приложения, ingress controller, monitoring stack, PostgreSQL, RabbitMQ, Helm charts и storage class.
 
 ## Требования
 
-- Linux VM с systemd.
-- SSH-доступ к каждой ноде.
-- Пользователь с sudo-правами.
-- Доступ worker-нод к control-plane по `6443/tcp`.
-- Доступ между нодами по `8472/udp`, если используется стандартный Flannel VXLAN.
-- На управляющей машине установлены Ansible и kubectl.
+На управляющей машине:
 
-## Подготовка inventory
+- Ansible;
+- SSH-ключ для подключения к VM;
+- доступ к репозиторию `kubernetes-bootstrap`.
 
-Скопируйте пример inventory:
+Локальный `kubectl` не обязателен для запуска playbook'ов `create-namespaces.yml` и `verify-cluster.yml`: они выполняют `/usr/local/bin/kubectl` на control-plane. После `bootstrap-k3s.yml` kubeconfig копируется локально, поэтому локальный `kubectl` нужен только для ручной работы с кластером с управляющей машины.
+
+На каждой VM:
+
+- Linux с systemd;
+- пользователь с sudo-правами;
+- доступ в интернет для скачивания k3s installer;
+- доступность control-plane для worker-нод по `6443/tcp`;
+- доступ между нодами по `8472/udp`, если используется стандартный Flannel VXLAN.
+
+## Inventory
+
+Создайте рабочий inventory из примера:
 
 ```bash
 cp ansible/inventory.example.yml ansible/inventory.yml
 ```
 
-Отредактируйте `ansible/inventory.yml`: замените IP-адреса, SSH-пользователя и при необходимости путь к приватному ключу.
-
-Минимальная структура групп:
+Заполните реальные адреса и SSH-пользователя:
 
 ```yaml
-k3s_server:
-  hosts:
-    control-plane-1:
+all:
+  vars:
+    ansible_user: deployer
+    ansible_ssh_private_key_file: ~/.ssh/id_ed25519
 
-k3s_agents:
-  hosts:
-    worker-1:
-    worker-2:
+  children:
+    k3s_server:
+      hosts:
+        control-plane-1:
+          ansible_host: 31.192.111.254
+          k3s_node_ip: 10.0.0.10
+
+    k3s_agents:
+      hosts:
+        worker-1:
+          ansible_host: 31.192.111.255
+          k3s_node_ip: 10.0.0.11
 ```
+
+`ansible_host` - адрес, по которому Ansible подключается к серверу по SSH.
+
+`k3s_node_ip` - адрес, который k3s использует как IP Kubernetes-ноды. Если у сервера есть публичный и приватный IP, обычно `ansible_host` указывает на публичный SSH-адрес, а `k3s_node_ip` - на приватный адрес внутри сети кластера.
+
+Не задавайте `ansible_become: true` глобально в `all.vars`: это может заставить delegated-задачи на `localhost` выполнять sudo. Playbook'и сами включают `become: true` там, где он нужен.
 
 ## Переменные
 
-Основные переменные находятся в `ansible/group_vars/all.yml`.
+Основные переменные лежат в `ansible/group_vars/all.yml`.
 
 | Переменная | Назначение |
 | --- | --- |
 | `k3s_version` | Версия k3s для установки. |
-| `k3s_server_url` | URL Kubernetes API control-plane. |
-| `kubeconfig_local_path` | Локальный путь для kubeconfig. |
-| `cluster_namespaces` | Список namespace, которые нужно создать. |
+| `k3s_server_url` | URL Kubernetes API control-plane для подключения worker-нод. |
+| `kubeconfig_local_path` | Локальный путь, куда будет сохранен kubeconfig. |
+| `cluster_namespaces` | Namespace, которые создает `create-namespaces.yml`. |
+
+По умолчанию kubeconfig сохраняется в `~/.kube/sunboys-k3s.yaml` или в путь из переменной окружения `KUBECONFIG`, если она задана.
 
 ## Запуск
 
-Установите control-plane, подключите worker-ноды и сохраните kubeconfig:
+Установите k3s control-plane, подключите worker-ноды и сохраните kubeconfig:
 
 ```bash
 ansible-playbook -i ansible/inventory.yml ansible/playbooks/bootstrap-k3s.yml
@@ -77,7 +101,22 @@ ansible-playbook -i ansible/inventory.yml ansible/playbooks/create-namespaces.ym
 ansible-playbook -i ansible/inventory.yml ansible/playbooks/verify-cluster.yml
 ```
 
-Можно также выполнить проверки вручную:
+`verify-cluster.yml` печатает вывод команд:
+
+- `kubectl cluster-info`;
+- `kubectl get nodes -o wide`;
+- `kubectl get namespace app infra monitoring`;
+- `kubectl -n kube-system get pods`.
+
+Если sudo на удаленной VM требует пароль, добавьте `-K`:
+
+```bash
+ansible-playbook -K -i ansible/inventory.yml ansible/playbooks/bootstrap-k3s.yml
+```
+
+## Ручная проверка
+
+После bootstrap можно работать с кластером с управляющей машины, если установлен локальный `kubectl`:
 
 ```bash
 kubectl --kubeconfig ~/.kube/sunboys-k3s.yaml cluster-info
@@ -86,17 +125,31 @@ kubectl --kubeconfig ~/.kube/sunboys-k3s.yaml get ns app infra monitoring
 kubectl --kubeconfig ~/.kube/sunboys-k3s.yaml -n kube-system get pods
 ```
 
-## Ожидаемый результат
-
-`kubectl get nodes` должен показать control-plane и все worker-ноды в статусе `Ready`.
-
-Namespace `app`, `infra`, `monitoring` должны существовать:
+Без локального `kubectl` можно выполнить проверку на control-plane:
 
 ```bash
-kubectl --kubeconfig ~/.kube/sunboys-k3s.yaml get ns app infra monitoring
+ssh deployer@<control-plane-ip>
+sudo /usr/local/bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get nodes -o wide
 ```
 
+## Ожидаемый результат
+
+Кластер считается готовым, когда:
+
+- `verify-cluster.yml` завершается без ошибок;
+- control-plane и worker-ноды находятся в статусе `Ready`;
+- namespace `app`, `infra`, `monitoring` существуют;
+- pod'ы в `kube-system` находятся в `Running` или `Completed`.
+
 ## Troubleshooting
+
+### `No such file or directory: kubectl`
+
+Это означает, что playbook пытается выполнить локальный `kubectl`, которого нет на управляющей машине. Актуальные `create-namespaces.yml` и `verify-cluster.yml` выполняют kubectl на control-plane, поэтому обновите репозиторий и повторите запуск.
+
+### `sudo: a password is required` на localhost
+
+Проверьте, что в `ansible/inventory.yml` нет глобального `ansible_become: true` в `all.vars`. Для удаленных задач become уже включен в playbook'ах.
 
 ### Worker-нода не подключается
 
@@ -106,31 +159,31 @@ kubectl --kubeconfig ~/.kube/sunboys-k3s.yaml get ns app infra monitoring
 curl -k https://<control-plane-ip>:6443
 ```
 
-Проверьте firewall/security group для `6443/tcp`.
+Если соединения нет, проверьте firewall/security group для `6443/tcp`.
 
-### Node в статусе NotReady
+### Node в статусе `NotReady`
 
-Проверьте системные pod'ы:
+На control-plane проверьте системные pod'ы:
 
 ```bash
-kubectl --kubeconfig ~/.kube/sunboys-k3s.yaml -n kube-system get pods
+sudo /usr/local/bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n kube-system get pods
 ```
 
-На проблемной ноде проверьте сервис:
+На проблемной worker-ноде проверьте агент:
 
 ```bash
 sudo systemctl status k3s-agent
 sudo journalctl -u k3s-agent -n 100 --no-pager
 ```
 
-Для control-plane:
+На control-plane проверьте server:
 
 ```bash
 sudo systemctl status k3s
 sudo journalctl -u k3s -n 100 --no-pager
 ```
 
-### Kubectl смотрит не в тот кластер
+### Kubeconfig смотрит не в тот кластер
 
 Передайте kubeconfig явно:
 
@@ -146,12 +199,5 @@ export KUBECONFIG=~/.kube/sunboys-k3s.yaml
 
 ### K3s уже установлен
 
-Playbook проверяет наличие systemd unit-файлов `k3s.service` и `k3s-agent.service`. Если нужно полностью пересоздать кластер, сначала вручную удалите k3s штатными uninstall-скриптами на соответствующих нодах. Не делайте это на рабочем кластере без отдельного плана миграции.
+Playbook проверяет наличие systemd unit-файлов `k3s.service` и `k3s-agent.service`. Если нужно полностью пересоздать кластер, удаляйте k3s вручную штатными uninstall-скриптами и только после отдельного плана, потому что это разрушительная операция.
 
-### Sudo требует пароль
-
-Запустите playbook с запросом become-пароля:
-
-```bash
-ansible-playbook -K -i ansible/inventory.yml ansible/playbooks/bootstrap-k3s.yml
-```

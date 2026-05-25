@@ -1,16 +1,15 @@
 ---
 - name: Create base Kubernetes namespaces
-  hosts: localhost
+  hosts: k3s_server
+  become: true
   gather_facts: false
-  vars:
-    ansible_connection: local
   tasks:
     - name: Create namespace manifest
       ansible.builtin.command:
         argv:
-          - kubectl
+          - /usr/local/bin/kubectl
           - --kubeconfig
-          - "{{ kubeconfig_local_path }}"
+          - /etc/rancher/k3s/k3s.yaml
           - create
           - namespace
           - "{{ item }}"
@@ -24,9 +23,9 @@
     - name: Apply namespace manifest
       ansible.builtin.command:
         argv:
-          - kubectl
+          - /usr/local/bin/kubectl
           - --kubeconfig
-          - "{{ kubeconfig_local_path }}"
+          - /etc/rancher/k3s/k3s.yaml
           - apply
           - -f
           - "-"
