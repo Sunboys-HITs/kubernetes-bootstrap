@@ -1,0 +1,120 @@
+---
+- name: Prepare k3s nodes
+  hosts:
+    - k3s_server
+    - k3s_agents
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Check supported service manager
+      ansible.builtin.assert:
+        that:
+          - ansible_service_mgr == "systemd"
+        fail_msg: "k3s playbook expects Linux hosts managed by systemd."
+
+    - name: Install base packages
+      ansible.builtin.package:
+        name:
+          - ca-certificates
+          - curl
+        state: present
+
+- name: Install k3s control-plane
+  hosts: k3s_server
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Check if k3s server service exists
+      ansible.builtin.stat:
+        path: /etc/systemd/system/k3s.service
+      register: k3s_server_service
+
+    - name: Install k3s server
+      ansible.builtin.shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='{{ k3s_version }}' sh -s - server \
+          --write-kubeconfig-mode 0644 \
+          --tls-san '{{ k3s_tls_san }}' \
+          --node-ip '{{ k3s_node_ip | default(ansible_host) }}'
+      args:
+        executable: /bin/sh
+      when: not k3s_server_service.stat.exists
+
+    - name: Ensure k3s server is enabled and running
+      ansible.builtin.systemd:
+        name: k3s
+        enabled: true
+        state: started
+
+    - name: Wait for kubeconfig on control-plane
+      ansible.builtin.wait_for:
+        path: /etc/rancher/k3s/k3s.yaml
+        timeout: 120
+
+    - name: Wait for node token on control-plane
+      ansible.builtin.wait_for:
+        path: /var/lib/rancher/k3s/server/node-token
+        timeout: 120
+
+    - name: Read k3s node token
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      register: k3s_node_token_raw
+      no_log: true
+
+    - name: Store k3s node token for agent play
+      ansible.builtin.set_fact:
+        k3s_node_token: "{{ k3s_node_token_raw.content | b64decode | trim }}"
+      no_log: true
+
+- name: Install k3s workers
+  hosts: k3s_agents
+  become: true
+  gather_facts: true
+  vars:
+    k3s_server_host: "{{ groups[k3s_server_group][0] }}"
+  tasks:
+    - name: Check if k3s agent service exists
+      ansible.builtin.stat:
+        path: /etc/systemd/system/k3s-agent.service
+      register: k3s_agent_service
+
+    - name: Install k3s agent
+      ansible.builtin.shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='{{ k3s_version }}' K3S_URL='{{ k3s_server_url }}' K3S_TOKEN='{{ hostvars[k3s_server_host].k3s_node_token }}' sh -s - agent \
+          --node-ip '{{ k3s_node_ip | default(ansible_host) }}'
+      args:
+        executable: /bin/sh
+      when: not k3s_agent_service.stat.exists
+      no_log: true
+
+    - name: Ensure k3s agent is enabled and running
+      ansible.builtin.systemd:
+        name: k3s-agent
+        enabled: true
+        state: started
+
+- name: Configure local kubeconfig
+  hosts: k3s_server
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read kubeconfig from control-plane
+      ansible.builtin.slurp:
+        src: /etc/rancher/k3s/k3s.yaml
+      register: kubeconfig_raw
+
+    - name: Ensure local kubeconfig directory exists
+      ansible.builtin.file:
+        path: "{{ kubeconfig_local_path | dirname }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+
+    - name: Write local kubeconfig
+      ansible.builtin.copy:
+        content: "{{ kubeconfig_raw.content | b64decode | replace('https://127.0.0.1:6443', k3s_server_url) }}"
+        dest: "{{ kubeconfig_local_path }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false

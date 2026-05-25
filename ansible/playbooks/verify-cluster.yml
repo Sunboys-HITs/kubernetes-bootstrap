@@ -1,0 +1,51 @@
+---
+- name: Verify k3s cluster
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ansible_connection: local
+  tasks:
+    - name: Show Kubernetes cluster info
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig_local_path }}"
+          - cluster-info
+      changed_when: false
+
+    - name: Show Kubernetes nodes
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig_local_path }}"
+          - get
+          - nodes
+          - -o
+          - wide
+      changed_when: false
+
+    - name: Check required namespaces
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig_local_path }}"
+          - get
+          - namespace
+          - "{{ item }}"
+      changed_when: false
+      loop: "{{ cluster_namespaces }}"
+
+    - name: Show kube-system pods
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig_local_path }}"
+          - -n
+          - kube-system
+          - get
+          - pods
+      changed_when: false

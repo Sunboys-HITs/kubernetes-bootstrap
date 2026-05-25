@@ -1,0 +1,36 @@
+---
+- name: Create base Kubernetes namespaces
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ansible_connection: local
+  tasks:
+    - name: Create namespace manifest
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig_local_path }}"
+          - create
+          - namespace
+          - "{{ item }}"
+          - --dry-run=client
+          - -o
+          - yaml
+      register: namespace_manifests
+      changed_when: false
+      loop: "{{ cluster_namespaces }}"
+
+    - name: Apply namespace manifest
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig_local_path }}"
+          - apply
+          - -f
+          - "-"
+        stdin: "{{ item.stdout }}"
+      register: namespace_apply
+      changed_when: "'created' in namespace_apply.stdout"
+      loop: "{{ namespace_manifests.results }}"
