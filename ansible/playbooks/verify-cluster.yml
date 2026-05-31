@@ -3,6 +3,8 @@
   hosts: k3s_server
   become: true
   gather_facts: false
+  vars:
+    expected_k3s_node_count: "{{ groups[k3s_server_group] | length + groups[k3s_agent_group] | length }}"
   tasks:
     - name: Show Kubernetes cluster info
       ansible.builtin.command:
@@ -34,6 +36,13 @@
     - name: Print Kubernetes nodes
       ansible.builtin.debug:
         var: cluster_nodes.stdout_lines
+
+    - name: Check expected Kubernetes node count
+      ansible.builtin.assert:
+        that:
+          - cluster_nodes.stdout_lines[1:] | length == expected_k3s_node_count | int
+        fail_msg: "Expected {{ expected_k3s_node_count }} Kubernetes nodes from inventory, got {{ cluster_nodes.stdout_lines[1:] | length }}."
+        success_msg: "All {{ expected_k3s_node_count }} Kubernetes nodes from inventory are registered."
 
     - name: Check required namespaces
       ansible.builtin.command:
@@ -68,3 +77,23 @@
     - name: Print kube-system pods
       ansible.builtin.debug:
         var: kube_system_pods.stdout_lines
+
+    - name: Show API ingress
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+          - -n
+          - "{{ ingress_namespace }}"
+          - get
+          - ingress
+          - "{{ ingress_name }}"
+          - -o
+          - wide
+      register: api_ingress
+      changed_when: false
+
+    - name: Print API ingress
+      ansible.builtin.debug:
+        var: api_ingress.stdout_lines

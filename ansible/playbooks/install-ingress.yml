@@ -1,0 +1,110 @@
+---
+- name: Install and verify API ingress
+  hosts: k3s_server
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check Traefik ingress controller deployment
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+          - -n
+          - kube-system
+          - rollout
+          - status
+          - deployment/traefik
+          - --timeout=180s
+      changed_when: false
+
+    - name: Check Traefik service
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+          - -n
+          - kube-system
+          - get
+          - service
+          - traefik
+      changed_when: false
+
+    - name: Check API backend services exist
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+          - -n
+          - "{{ ingress_namespace }}"
+          - get
+          - service
+          - "{{ item.service_name }}"
+      changed_when: false
+      loop: "{{ api_ingress_routes }}"
+
+    - name: Apply API ingress
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+          - apply
+          - -f
+          - "-"
+        stdin: |
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: {{ ingress_name }}
+            namespace: {{ ingress_namespace }}
+          spec:
+            ingressClassName: {{ ingress_class_name }}
+            rules:
+              - host: {{ ingress_host }}
+                http:
+                  paths:
+          {% for route in api_ingress_routes %}
+                    - path: {{ route.path }}
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: {{ route.service_name }}
+                          port:
+                            number: {{ route.service_port }}
+          {% endfor %}
+      register: api_ingress_apply
+      changed_when: "'created' in api_ingress_apply.stdout or 'configured' in api_ingress_apply.stdout"
+
+    - name: Show API ingress
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+          - -n
+          - "{{ ingress_namespace }}"
+          - get
+          - ingress
+          - "{{ ingress_name }}"
+          - -o
+          - wide
+      register: api_ingress
+      changed_when: false
+
+    - name: Print API ingress
+      ansible.builtin.debug:
+        var: api_ingress.stdout_lines
+
+    - name: Check API routes through ingress
+      ansible.builtin.uri:
+        url: "{{ item.url }}"
+        status_code: "{{ item.status_code | default(200) }}"
+      register: api_ingress_health
+      retries: 12
+      delay: 5
+      until: api_ingress_health.status == (item.status_code | default(200))
+      loop: "{{ api_ingress_health_checks }}"
+      when: api_ingress_health_checks | length > 0

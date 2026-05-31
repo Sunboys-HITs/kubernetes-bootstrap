@@ -8,11 +8,12 @@ Runbook описывает базовое развертывание Kubernetes-
 
 - установка k3s control-plane;
 - подключение worker-нод;
+- настройка единого входа API через Ingress;
 - сохранение kubeconfig на управляющую машину;
 - создание namespace `app`, `infra`, `monitoring`;
 - проверка состояния кластера.
 
-На этом этапе не устанавливаются приложения, ingress controller, monitoring stack, PostgreSQL, RabbitMQ, Helm charts и storage class.
+На этом этапе не устанавливаются приложения, monitoring stack, PostgreSQL, RabbitMQ и storage class. В k3s используется встроенный Traefik Ingress Controller.
 
 ## Требования
 
@@ -78,6 +79,9 @@ all:
 | `k3s_server_url` | URL Kubernetes API control-plane для подключения worker-нод. |
 | `kubeconfig_local_path` | Локальный путь, куда будет сохранен kubeconfig. |
 | `cluster_namespaces` | Namespace, которые создает `create-namespaces.yml`. |
+| `ingress_host` | Единый hostname для публичного API. По умолчанию используется `sslip.io` от IP control-plane. |
+| `api_ingress_routes` | Список маршрутов `/api/*` на Kubernetes Service. |
+| `api_ingress_health_checks` | HTTP-проверки API через единый ingress-адрес. |
 
 По умолчанию kubeconfig сохраняется в `~/.kube/sunboys-k3s.yaml` или в путь из переменной окружения `KUBECONFIG`, если она задана.
 
@@ -95,6 +99,23 @@ ansible-playbook -i ansible/inventory.yml ansible/playbooks/bootstrap-k3s.yml
 ansible-playbook -i ansible/inventory.yml ansible/playbooks/create-namespaces.yml
 ```
 
+Настройте единый вход для API через Traefik Ingress:
+
+```bash
+ansible-playbook -i ansible/inventory.yml ansible/playbooks/install-ingress.yml
+```
+
+По умолчанию playbook создает Ingress `sunboys-api` в namespace `app` и маршрутизирует:
+
+| Path | Service |
+| --- | --- |
+| `/api/auth` | `auth-service:80` |
+| `/api/classrooms` | `main-service:80` |
+| `/api/tasks` | `main-service:80` |
+| `/api/submissions` | `main-service:80` |
+
+Перед запуском убедитесь, что эти `Service` уже существуют, или измените `api_ingress_routes` в `ansible/group_vars/all.yml`.
+
 Проверьте кластер:
 
 ```bash
@@ -107,6 +128,7 @@ ansible-playbook -i ansible/inventory.yml ansible/playbooks/verify-cluster.yml
 - `kubectl get nodes -o wide`;
 - `kubectl get namespace app infra monitoring`;
 - `kubectl -n kube-system get pods`.
+- `kubectl -n app get ingress sunboys-api -o wide`;
 
 Если sudo на удаленной VM требует пароль, добавьте `-K`:
 

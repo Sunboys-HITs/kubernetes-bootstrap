@@ -2,8 +2,11 @@
 k3s_version: v1.30.8+k3s1
 k3s_server_group: k3s_server
 k3s_agent_group: k3s_agents
-k3s_tls_san: "{{ hostvars[groups[k3s_server_group][0]].k3s_node_ip | default(hostvars[groups[k3s_server_group][0]].ansible_host) }}"
-k3s_server_url: "https://{{ k3s_tls_san }}:6443"
+k3s_tls_san:
+  - "{{ hostvars[groups[k3s_server_group][0]].k3s_node_ip }}"
+  - "{{ hostvars[groups[k3s_server_group][0]].ansible_host }}"
+k3s_server_url: "https://{{ hostvars[groups[k3s_server_group][0]].ansible_host }}:6443"
+k3s_public_server_url: "https://{{ hostvars[groups[k3s_server_group][0]].ansible_host }}:6443"
 
 kubeconfig_local_path: "{{ lookup('env', 'KUBECONFIG') | default((lookup('env', 'HOME') | default(lookup('env', 'USERPROFILE'), true)) + '/.kube/sunboys-k3s.yaml', true) }}"
 
@@ -11,3 +14,21 @@ cluster_namespaces:
   - app
   - infra
   - monitoring
+
+ingress_namespace: app
+ingress_name: sunboys-api
+ingress_class_name: traefik
+ingress_host: "{{ hostvars[groups[k3s_server_group][0]].ansible_host }}.sslip.io"
+ingress_public_url: "http://{{ ingress_host }}"
+
+api_ingress_routes:
+  - path: /api/auth
+    service_name: auth-service
+    service_port: 80
+
+api_ingress_health_checks:
+  - url: "{{ ingress_public_url }}/api/auth/health/ready"
+    status_code: 200
+
+auth_service_image: sunboys/authorization-service:latest
+auth_service_replicas: 1
