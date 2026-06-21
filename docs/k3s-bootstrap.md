@@ -82,6 +82,7 @@ all:
 | `ingress_host` | Единый hostname для публичного API. По умолчанию используется `sslip.io` от IP control-plane. |
 | `public_ingress_routes` | Публичные маршруты Auth Service без проверки токена. |
 | `protected_ingress_routes` | Маршруты Main Service, защищенные через ForwardAuth. |
+| `traefik_crd_api_group` | API-группа Traefik CRD, установленная в кластере. |
 | `forward_auth_address` | Внутрикластерный URL `/api/auth/validate`. |
 | `api_ingress_health_checks` | HTTP-проверки API через единый ingress-адрес. |
 
@@ -135,7 +136,7 @@ ansible-playbook -i ansible/inventory.yml ansible/playbooks/verify-cluster.yml
 - `kubectl get namespace app infra monitoring`;
 - `kubectl -n kube-system get pods`.
 - `kubectl -n app get ingress sunboys-auth-public sunboys-main-protected -o wide`;
-- `kubectl -n app get middleware auth-forward`;
+- `kubectl -n app get middlewares.traefik.containo.us auth-forward`;
 
 Если sudo на удаленной VM требует пароль, добавьте `-K`:
 

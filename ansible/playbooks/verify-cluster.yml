@@ -108,6 +108,6 @@
           - -n
           - "{{ ingress_namespace }}"
           - get
-          - middleware
+          - "middlewares.{{ traefik_crd_api_group }}"
           - "{{ forward_auth_middleware_name }}"
       changed_when: false

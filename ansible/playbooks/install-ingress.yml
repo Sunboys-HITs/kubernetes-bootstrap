@@ -73,7 +73,7 @@
           - -f
           - "-"
         stdin: |
-          apiVersion: traefik.io/v1alpha1
+          apiVersion: {{ traefik_crd_api_group }}/v1alpha1
           kind: Middleware
           metadata:
             name: {{ forward_auth_middleware_name }}
@@ -152,6 +152,21 @@
     - name: Print API ingress
       ansible.builtin.debug:
         var: api_ingress.stdout_lines
+
+    - name: Show ForwardAuth middleware
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+          - -n
+          - "{{ ingress_namespace }}"
+          - get
+          - "middlewares.{{ traefik_crd_api_group }}"
+          - "{{ forward_auth_middleware_name }}"
+          - -o
+          - wide
+      changed_when: false
 
     - name: Check API routes through ingress
       ansible.builtin.uri:

@@ -21,6 +21,7 @@ protected_ingress_name: sunboys-main-protected
 ingress_class_name: traefik
 ingress_host: "{{ hostvars[groups[k3s_server_group][0]].ansible_host }}.sslip.io"
 ingress_public_url: "http://{{ ingress_host }}"
+traefik_crd_api_group: traefik.containo.us
 forward_auth_middleware_name: auth-forward
 forward_auth_address: "http://auth-service.{{ ingress_namespace }}.svc.cluster.local/api/auth/validate"
 
