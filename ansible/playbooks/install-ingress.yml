@@ -43,9 +43,27 @@
           - service
           - "{{ item.service_name }}"
       changed_when: false
-      loop: "{{ api_ingress_routes }}"
+      loop: "{{ public_ingress_routes + protected_ingress_routes }}"
 
-    - name: Apply API ingress
+    - name: Remove legacy ingresses
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+          - -n
+          - "{{ ingress_namespace }}"
+          - delete
+          - ingress
+          - "{{ item }}"
+          - --ignore-not-found=true
+      loop:
+        - sunboys-api
+        - main-service
+      register: legacy_ingress_delete
+      changed_when: "'deleted' in legacy_ingress_delete.stdout"
+
+    - name: Apply ForwardAuth middleware and API ingresses
       ansible.builtin.command:
         argv:
           - /usr/local/bin/kubectl
@@ -55,10 +73,23 @@
           - -f
           - "-"
         stdin: |
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: {{ forward_auth_middleware_name }}
+            namespace: {{ ingress_namespace }}
+          spec:
+            forwardAuth:
+              address: {{ forward_auth_address }}
+              trustForwardHeader: false
+              authResponseHeaders:
+                - X-User-Id
+                - X-User-Role
+          ---
           apiVersion: networking.k8s.io/v1
           kind: Ingress
           metadata:
-            name: {{ ingress_name }}
+            name: {{ public_ingress_name }}
             namespace: {{ ingress_namespace }}
           spec:
             ingressClassName: {{ ingress_class_name }}
@@ -66,9 +97,32 @@
               - host: {{ ingress_host }}
                 http:
                   paths:
-          {% for route in api_ingress_routes %}
+          {% for route in public_ingress_routes %}
                     - path: {{ route.path }}
-                      pathType: Prefix
+                      pathType: {{ route.path_type }}
+                      backend:
+                        service:
+                          name: {{ route.service_name }}
+                          port:
+                            number: {{ route.service_port }}
+          {% endfor %}
+          ---
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: {{ protected_ingress_name }}
+            namespace: {{ ingress_namespace }}
+            annotations:
+              traefik.ingress.kubernetes.io/router.middlewares: "{{ ingress_namespace }}-{{ forward_auth_middleware_name }}@kubernetescrd"
+          spec:
+            ingressClassName: {{ ingress_class_name }}
+            rules:
+              - host: {{ ingress_host }}
+                http:
+                  paths:
+          {% for route in protected_ingress_routes %}
+                    - path: {{ route.path }}
+                      pathType: {{ route.path_type }}
                       backend:
                         service:
                           name: {{ route.service_name }}
@@ -88,7 +142,8 @@
           - "{{ ingress_namespace }}"
           - get
           - ingress
-          - "{{ ingress_name }}"
+          - "{{ public_ingress_name }}"
+          - "{{ protected_ingress_name }}"
           - -o
           - wide
       register: api_ingress

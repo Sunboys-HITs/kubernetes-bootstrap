@@ -78,7 +78,7 @@
       ansible.builtin.debug:
         var: kube_system_pods.stdout_lines
 
-    - name: Show API ingress
+    - name: Show API ingresses
       ansible.builtin.command:
         argv:
           - /usr/local/bin/kubectl
@@ -88,7 +88,8 @@
           - "{{ ingress_namespace }}"
           - get
           - ingress
-          - "{{ ingress_name }}"
+          - "{{ public_ingress_name }}"
+          - "{{ protected_ingress_name }}"
           - -o
           - wide
       register: api_ingress
@@ -97,3 +98,16 @@
     - name: Print API ingress
       ansible.builtin.debug:
         var: api_ingress.stdout_lines
+
+    - name: Show ForwardAuth middleware
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+          - -n
+          - "{{ ingress_namespace }}"
+          - get
+          - middleware
+          - "{{ forward_auth_middleware_name }}"
+      changed_when: false

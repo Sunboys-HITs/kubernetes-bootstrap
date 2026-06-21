@@ -80,7 +80,9 @@ all:
 | `kubeconfig_local_path` | Локальный путь, куда будет сохранен kubeconfig. |
 | `cluster_namespaces` | Namespace, которые создает `create-namespaces.yml`. |
 | `ingress_host` | Единый hostname для публичного API. По умолчанию используется `sslip.io` от IP control-plane. |
-| `api_ingress_routes` | Список маршрутов `/api/*` на Kubernetes Service. |
+| `public_ingress_routes` | Публичные маршруты Auth Service без проверки токена. |
+| `protected_ingress_routes` | Маршруты Main Service, защищенные через ForwardAuth. |
+| `forward_auth_address` | Внутрикластерный URL `/api/auth/validate`. |
 | `api_ingress_health_checks` | HTTP-проверки API через единый ingress-адрес. |
 
 По умолчанию kubeconfig сохраняется в `~/.kube/sunboys-k3s.yaml` или в путь из переменной окружения `KUBECONFIG`, если она задана.
@@ -105,16 +107,20 @@ ansible-playbook -i ansible/inventory.yml ansible/playbooks/create-namespaces.ym
 ansible-playbook -i ansible/inventory.yml ansible/playbooks/install-ingress.yml
 ```
 
-По умолчанию playbook создает Ingress `sunboys-api` в namespace `app` и маршрутизирует:
+По умолчанию playbook создает публичный Ingress `sunboys-auth-public`, защищенный Ingress `sunboys-main-protected` и Traefik Middleware `auth-forward` в namespace `app`.
 
 | Path | Service |
 | --- | --- |
-| `/api/auth` | `auth-service:80` |
-| `/api/classrooms` | `main-service:80` |
-| `/api/tasks` | `main-service:80` |
-| `/api/submissions` | `main-service:80` |
+| `/api/auth/login` | `auth-service:80`, публичный |
+| `/api/auth/register` | `auth-service:80`, публичный |
+| `/api/auth/health/*` | `auth-service:80`, публичный |
+| `/` | `main-service:80`, ForwardAuth через `auth-service:80/api/auth/validate` |
 
-Перед запуском убедитесь, что эти `Service` уже существуют, или измените `api_ingress_routes` в `ansible/group_vars/all.yml`.
+При успешной проверке Traefik заменяет клиентские значения и передает в Main Service заголовки `X-User-Id` и `X-User-Role` из ответа Auth Service. Невалидный или отсутствующий Bearer token возвращает `401` до обращения к Main Service.
+
+Перед запуском убедитесь, что эти `Service` уже существуют, или измените `public_ingress_routes` и `protected_ingress_routes` в `ansible/group_vars/all.yml`.
+
+При обновлении playbook удаляет устаревшие Ingress `sunboys-api` и `main-service`, чтобы они не создавали маршруты в обход ForwardAuth.
 
 Проверьте кластер:
 
@@ -128,7 +134,8 @@ ansible-playbook -i ansible/inventory.yml ansible/playbooks/verify-cluster.yml
 - `kubectl get nodes -o wide`;
 - `kubectl get namespace app infra monitoring`;
 - `kubectl -n kube-system get pods`.
-- `kubectl -n app get ingress sunboys-api -o wide`;
+- `kubectl -n app get ingress sunboys-auth-public sunboys-main-protected -o wide`;
+- `kubectl -n app get middleware auth-forward`;
 
 Если sudo на удаленной VM требует пароль, добавьте `-K`:
 

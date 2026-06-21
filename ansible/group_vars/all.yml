@@ -16,14 +16,32 @@ cluster_namespaces:
   - monitoring
 
 ingress_namespace: app
-ingress_name: sunboys-api
+public_ingress_name: sunboys-auth-public
+protected_ingress_name: sunboys-main-protected
 ingress_class_name: traefik
 ingress_host: "{{ hostvars[groups[k3s_server_group][0]].ansible_host }}.sslip.io"
 ingress_public_url: "http://{{ ingress_host }}"
+forward_auth_middleware_name: auth-forward
+forward_auth_address: "http://auth-service.{{ ingress_namespace }}.svc.cluster.local/api/auth/validate"
 
-api_ingress_routes:
-  - path: /api/auth
+public_ingress_routes:
+  - path: /api/auth/login
+    path_type: Exact
     service_name: auth-service
+    service_port: 80
+  - path: /api/auth/register
+    path_type: Exact
+    service_name: auth-service
+    service_port: 80
+  - path: /api/auth/health
+    path_type: Prefix
+    service_name: auth-service
+    service_port: 80
+
+protected_ingress_routes:
+  - path: /
+    path_type: Prefix
+    service_name: main-service
     service_port: 80
 
 api_ingress_health_checks:
