@@ -14,6 +14,10 @@ cluster_namespaces:
   - app
   - infra
   - monitoring
+  - keda
+
+keda_chart_version: 2.17.2
+keda_namespace: keda
 
 ingress_namespace: app
 public_ingress_name: sunboys-auth-public

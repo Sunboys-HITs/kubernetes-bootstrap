@@ -1,0 +1,90 @@
+---
+- name: Disable Code Runner autoscaling and uninstall KEDA
+  hosts: k3s_server
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Remove Code Runner ScaledObject
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+          - -n
+          - app
+          - delete
+          - scaledobject
+          - code-runner-service
+          - --ignore-not-found=true
+      register: scaledobject_delete
+      changed_when: "'deleted' in scaledobject_delete.stdout"
+
+    - name: Set Code Runner to one replica
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+          - -n
+          - app
+          - scale
+          - deployment/code-runner-service
+          - --replicas=1
+      register: code_runner_scale
+      changed_when: "'scaled' in code_runner_scale.stdout"
+
+    - name: Remove Code Runner TriggerAuthentication
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+          - -n
+          - app
+          - delete
+          - triggerauthentication
+          - code-runner-rabbitmq
+          - --ignore-not-found=true
+      register: trigger_auth_delete
+      changed_when: "'deleted' in trigger_auth_delete.stdout"
+
+    - name: Check whether KEDA release exists
+      ansible.builtin.command:
+        argv:
+          - helm
+          - status
+          - keda
+          - --namespace
+          - "{{ keda_namespace }}"
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+      register: keda_release
+      changed_when: false
+      failed_when: false
+
+    - name: Uninstall KEDA release
+      ansible.builtin.command:
+        argv:
+          - helm
+          - uninstall
+          - keda
+          - --namespace
+          - "{{ keda_namespace }}"
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+          - --wait
+          - --timeout
+          - 5m
+      when: keda_release.rc == 0
+
+    - name: Show Code Runner replicas
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/rancher/k3s/k3s.yaml
+          - -n
+          - app
+          - get
+          - deployment/code-runner-service
+      changed_when: false
